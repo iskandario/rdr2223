@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace {
 HMODULE moduleHandle{};
@@ -31,12 +32,25 @@ float turboSpeed = 52.0f;
 float runAnimRate = 2.5f;
 float turboAnimRate = 4.0f;
 
-float giantScale = 4.25f;
+float giantScale = 1.35f;
 float runForce = 80.0f;
 float turboForce = 260.0f;
 
 Hash originalModel = 0;
 Hash customModel = 0;
+
+struct TrafficShell {
+    Ped mount{};
+    Entity shell{};
+    bool vehicleShell{};
+};
+
+std::vector<TrafficShell> trafficShells;
+Hash addonCarModel = 0;
+Hash fallbackVehicleModel = 0;
+int trafficPercent = 55;
+bool trafficEnabled = true;
+bool addonCarAvailable = false;
 
 Vector3 lastImpact{};
 bool haveLastImpact = false;
@@ -144,6 +158,137 @@ void tryApplyCustomModel() {
     log("custom model applied");
 }
 
+
+bool modelReady(Hash model) {
+    if (!model || !STREAMING::IS_MODEL_VALID(model)) return false;
+    if (STREAMING::HAS_MODEL_LOADED(model)) return true;
+
+    STREAMING::REQUEST_MODEL(model, false);
+    const ULONGLONG deadline = GetTickCount64() + 1500;
+    while (!STREAMING::HAS_MODEL_LOADED(model) && GetTickCount64() < deadline) WAIT(0);
+    return STREAMING::HAS_MODEL_LOADED(model);
+}
+
+bool mountAlreadyConverted(Ped mount) {
+    for (const auto& t : trafficShells) {
+        if (t.mount == mount) return true;
+    }
+    return false;
+}
+
+void deleteTrafficShell(TrafficShell& t) {
+    if (t.mount && ENTITY::DOES_ENTITY_EXIST(t.mount)) {
+        ENTITY::SET_ENTITY_VISIBLE(t.mount, true);
+    }
+
+    if (t.shell && ENTITY::DOES_ENTITY_EXIST(t.shell)) {
+        if (t.vehicleShell) {
+            Vehicle v = static_cast<Vehicle>(t.shell);
+            VEHICLE::DELETE_VEHICLE(&v);
+        } else {
+            Object o = static_cast<Object>(t.shell);
+            OBJECT::DELETE_OBJECT(&o);
+        }
+    }
+
+    t.shell = 0;
+}
+
+void cleanupTraffic() {
+    for (auto& t : trafficShells) deleteTrafficShell(t);
+    trafficShells.clear();
+}
+
+void pruneTraffic() {
+    for (auto it = trafficShells.begin(); it != trafficShells.end();) {
+        if (!it->mount || !ENTITY::DOES_ENTITY_EXIST(it->mount)) {
+            if (it->shell && ENTITY::DOES_ENTITY_EXIST(it->shell)) {
+                if (it->vehicleShell) {
+                    Vehicle v = static_cast<Vehicle>(it->shell);
+                    VEHICLE::DELETE_VEHICLE(&v);
+                } else {
+                    Object o = static_cast<Object>(it->shell);
+                    OBJECT::DELETE_OBJECT(&o);
+                }
+            }
+            it = trafficShells.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+bool attachAddonCarShell(Ped mount) {
+    if (!modelReady(addonCarModel)) return false;
+
+    const Vector3 pos = ENTITY::GET_ENTITY_COORDS(mount, NULL, true);
+    Object shell = OBJECT::CREATE_OBJECT(addonCarModel, pos, true, true, true, false, false);
+    if (!shell || !ENTITY::DOES_ENTITY_EXIST(shell)) return false;
+
+    ENTITY::SET_ENTITY_COLLISION(shell, false, false);
+    ENTITY::ATTACH_ENTITY_TO_ENTITY(
+        shell, mount, 0,
+        Vector3(0.0f, 0.15f, -0.70f),
+        Vector3(0.0f, 0.0f, 0.0f),
+        NULL, true, true, false, 0, true, NULL, NULL
+    );
+
+    ENTITY::SET_ENTITY_VISIBLE(mount, false);
+    trafficShells.push_back({mount, shell, false});
+    return true;
+}
+
+bool attachFallbackVehicleShell(Ped mount) {
+    if (!modelReady(fallbackVehicleModel)) return false;
+
+    const Vector3 pos = ENTITY::GET_ENTITY_COORDS(mount, NULL, true);
+    Vehicle shell = VEHICLE::CREATE_VEHICLE(
+        fallbackVehicleModel,
+        pos.x, pos.y, pos.z,
+        ENTITY::GET_ENTITY_HEADING(mount),
+        false, false, false, false
+    );
+
+    if (!shell || !ENTITY::DOES_ENTITY_EXIST(shell)) return false;
+
+    ENTITY::SET_ENTITY_COLLISION(shell, false, false);
+    ENTITY::ATTACH_ENTITY_TO_ENTITY(
+        shell, mount, 0,
+        Vector3(0.0f, -0.25f, -0.55f),
+        Vector3(0.0f, 0.0f, 0.0f),
+        NULL, true, true, false, 0, true, NULL, NULL
+    );
+
+    ENTITY::SET_ENTITY_VISIBLE(mount, false);
+    trafficShells.push_back({mount, shell, true});
+    return true;
+}
+
+void scanTraffic() {
+    if (!trafficEnabled || online()) return;
+
+    Ped player = PLAYER::PLAYER_PED_ID();
+    Ped worldPeds[512]{};
+    const int count = worldGetAllPeds(worldPeds, 512);
+
+    for (int i = 0; i < count; ++i) {
+        Ped rider = worldPeds[i];
+        if (!rider || rider == player || !ENTITY::DOES_ENTITY_EXIST(rider) || ENTITY::IS_ENTITY_DEAD(rider)) continue;
+
+        Ped mount = PED::GET_MOUNT(rider);
+        if (!mount || !ENTITY::DOES_ENTITY_EXIST(mount) || mountAlreadyConverted(mount)) continue;
+
+        const unsigned sample = (static_cast<unsigned>(rider) * 1103515245u + 12345u) % 100u;
+        if (sample >= static_cast<unsigned>(trafficPercent)) continue;
+
+        // First try the real addon car. If it is not installed, fall back to a
+        // base-game buggy shell so the traffic feature is still visibly working.
+        if (!attachAddonCarShell(mount)) {
+            attachFallbackVehicleShell(mount);
+        }
+    }
+}
+
 void keyboard(DWORD key, WORD, BYTE, BOOL, BOOL, BOOL wasDown, BOOL up) {
     if (key == 'W') { forwardHeld.store(!up); return; }
     if (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT) {
@@ -155,6 +300,10 @@ void keyboard(DWORD key, WORD, BYTE, BOOL, BOOL, BOOL wasDown, BOOL up) {
 
     if (key == VK_F6) events.fetch_or(ToggleFlash);
     if (key == VK_F9) events.fetch_or(Emergency);
+    if (key == VK_F10) {
+        trafficEnabled = !trafficEnabled;
+        if (!trafficEnabled) cleanupTraffic();
+    }
 }
 
 void updateExplosiveBullets(Ped ped) {
@@ -245,7 +394,7 @@ void scriptMain() {
 
     explosiveBullets = GetPrivateProfileIntW(L"Flash", L"ExplosiveBullets", 1, iniPath.c_str()) != 0;
     const int giantScalePercent = std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"GiantScalePercent", 425, iniPath.c_str())), 100, 400);
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"GiantScalePercent", 135, iniPath.c_str())), 100, 400);
     giantScale = static_cast<float>(giantScalePercent) / 100.0f;
 
     runForce = static_cast<float>(std::clamp(
@@ -256,6 +405,27 @@ void scriptMain() {
 
     useCustomModel = GetPrivateProfileIntW(L"Flash", L"UseCustomModel", 0, iniPath.c_str()) != 0;
 
+    trafficPercent = std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Traffic", L"TrafficPercent", 55, iniPath.c_str())),
+        0, 100
+    );
+
+    wchar_t trafficModelWide[128]{};
+    GetPrivateProfileStringW(
+        L"Traffic", L"AddonCarModelName", L"ironroadster",
+        trafficModelWide, 128, iniPath.c_str()
+    );
+
+    char trafficModelUtf8[128]{};
+    WideCharToMultiByte(
+        CP_UTF8, 0, trafficModelWide, -1,
+        trafficModelUtf8, 128, nullptr, nullptr
+    );
+
+    addonCarModel = MISC::GET_HASH_KEY(trafficModelUtf8);
+    fallbackVehicleModel = MISC::GET_HASH_KEY("BUGGY01");
+    addonCarAvailable = STREAMING::IS_MODEL_VALID(addonCarModel);
+
     wchar_t modelNameWide[128]{};
     GetPrivateProfileStringW(L"Flash", L"CustomModelName", L"", modelNameWide, 128, iniPath.c_str());
 
@@ -265,9 +435,10 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v12 GIANT TRAFFIC started; Story Mode only");
+    log("FlashRDR2 v13 single-ASI traffic started; Story Mode only");
 
     auto lastTick = std::chrono::steady_clock::now();
+    ULONGLONG nextTrafficScan = 0;
 
     for (;;) {
         WAIT(0);
@@ -326,12 +497,19 @@ void scriptMain() {
         MISC::SET_SUPER_JUMP_THIS_FRAME(player);
         updateFlashRun(ped);
 
+        pruneTraffic();
+        const ULONGLONG nowMs = GetTickCount64();
+        if (trafficEnabled && nowMs >= nextTrafficScan) {
+            scanTraffic();
+            nextTrafficScan = nowMs + 1500;
+        }
+
         const float kmh = ENTITY::GET_ENTITY_SPEED(ped) * 3.6f;
 
         static char hud[256];
         sprintf_s(
             hud,
-            "FLASH v12 GIANT | %s | %.0f km/h | GIANT %.1fx | GODMODE | INF STAMINA | EXPLOSIVE | F9 reset",
+            "FLASH v13 | %s | %.0f km/h | SCALE %.2fx | TRAFFIC %s | GODMODE | INF STAMINA | F10 traffic",
             sprintHeld.load() ? "MAX TURBO" : "SUPER RUN",
             kmh
         );
