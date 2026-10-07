@@ -173,7 +173,7 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v5 started; Story Mode only");
+    log("FlashRDR2 v6 started; Story Mode only");
 
     for (;;) {
         WAIT(0);
@@ -227,13 +227,43 @@ void scriptMain() {
 
         const bool moving = forwardHeld.load();
         const bool turbo = moving && sprintHeld.load();
+        const bool groundedRun =
+            moving
+            && !PED::IS_PED_FALLING(ped)
+            && !PED::IS_PED_JUMPING(ped)
+            && !PED::IS_PED_RAGDOLL(ped)
+            && !PED::IS_PED_CLIMBING(ped);
 
-        if (moving) {
-            PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? turboRate : runRate);
+        if (groundedRun) {
+            // Keep RDR2's running animation, but force real horizontal ground speed.
+            PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? 3.0f : 2.0f);
+
+            const Vector3 forward = ENTITY::GET_ENTITY_FORWARD_VECTOR(ped);
+            const float planarLength = std::sqrt(
+                forward.x * forward.x + forward.y * forward.y);
+
+            if (planarLength > 0.001f) {
+                const float nx = forward.x / planarLength;
+                const float ny = forward.y / planarLength;
+                const float speed = turbo ? 65.0f : 28.0f;
+
+                // Critical fix: Z is forced to zero while grounded.
+                // The old version preserved vertical velocity and could launch the player.
+                ENTITY::SET_ENTITY_VELOCITY(
+                    ped,
+                    nx * speed,
+                    ny * speed,
+                    0.0f
+                );
+            }
+
             ENTITY::SET_ENTITY_MOTION_BLUR(ped, true);
         } else {
             PED::SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0f);
-            ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
+
+            if (!moving) {
+                ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
+            }
         }
 
         MISC::SET_TIME_SCALE(1.0f);
@@ -243,7 +273,7 @@ void scriptMain() {
         static char hud[224];
         sprintf_s(
             hud,
-            "FLASH v5 | %.0f km/h | %s | INVINCIBLE | INF STAMINA | SUPER JUMP | F9 reset",
+            "FLASH v6 | %.0f km/h | %s | GODMODE | INF STAMINA | SUPER JUMP | F9 reset",
             kmh,
             turbo ? "TURBO" : (moving ? "RUN" : "READY")
         );
