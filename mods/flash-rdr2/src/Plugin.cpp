@@ -21,11 +21,13 @@ std::atomic<bool> sprintHeld{false};
 
 constexpr unsigned ToggleFlash = 1;
 constexpr unsigned Emergency = 2;
+constexpr unsigned ToggleChaos = 4;
 
 bool enabled = false;
 bool explosiveBullets = true;
 bool useCustomModel = false;
 bool modelApplied = false;
+bool chaosEnabled = true;
 
 float runSpeed = 24.0f;
 float turboSpeed = 52.0f;
@@ -51,6 +53,11 @@ Hash fallbackVehicleModel = 0;
 int trafficPercent = 55;
 bool trafficEnabled = true;
 bool addonCarAvailable = false;
+
+Hash voxelBlockModel = 0;
+std::vector<Object> chaosBlocks;
+ULONGLONG nextVoxelDrop = 0;
+ULONGLONG nextShockwave = 0;
 
 Vector3 lastImpact{};
 bool haveLastImpact = false;
@@ -84,7 +91,17 @@ bool eligible(Ped ped) {
 
 void display(const char* message) {
     HUD::SET_TEXT_SCALE(0.32f, 0.32f);
-    HUD::_SET_TEXT_COLOR(255, 220, 80, 255);
+
+    if (chaosEnabled) {
+        const ULONGLONG t = GetTickCount64() / 8;
+        const int r = static_cast<int>((t * 3) % 256);
+        const int g = static_cast<int>((t * 5 + 85) % 256);
+        const int b = static_cast<int>((t * 7 + 170) % 256);
+        HUD::_SET_TEXT_COLOR(r, g, b, 255);
+    } else {
+        HUD::_SET_TEXT_COLOR(255, 220, 80, 255);
+    }
+
     HUD::SET_TEXT_CENTRE(false);
     HUD::_DISPLAY_TEXT(MISC::_CREATE_VAR_STRING(10, "LITERAL_STRING", message), 0.025f, 0.08f);
 }
@@ -311,6 +328,119 @@ void scanTraffic() {
     }
 }
 
+
+void cleanupChaosBlocks() {
+    for (Object& o : chaosBlocks) {
+        if (o && ENTITY::DOES_ENTITY_EXIST(o)) {
+            OBJECT::DELETE_OBJECT(&o);
+        }
+    }
+    chaosBlocks.clear();
+}
+
+bool ensureVoxelModel() {
+    if (!voxelBlockModel || !STREAMING::IS_MODEL_VALID(voxelBlockModel)) return false;
+    if (STREAMING::HAS_MODEL_LOADED(voxelBlockModel)) return true;
+
+    STREAMING::REQUEST_MODEL(voxelBlockModel, false);
+    const ULONGLONG deadline = GetTickCount64() + 1200;
+    while (!STREAMING::HAS_MODEL_LOADED(voxelBlockModel) && GetTickCount64() < deadline) WAIT(0);
+    return STREAMING::HAS_MODEL_LOADED(voxelBlockModel);
+}
+
+void spawnVoxelRain(Ped playerPed) {
+    if (!chaosEnabled || !ensureVoxelModel()) return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (now < nextVoxelDrop) return;
+    nextVoxelDrop = now + 650;
+
+    const Vector3 p = ENTITY::GET_ENTITY_COORDS(playerPed, NULL, true);
+    const float angle = static_cast<float>((now / 23) % 628) / 100.0f;
+    const float radius = 3.0f + static_cast<float>((now / 41) % 700) / 100.0f;
+
+    const float x = p.x + std::cos(angle) * radius;
+    const float y = p.y + std::sin(angle) * radius;
+    const float z = p.z + 12.0f + static_cast<float>((now / 17) % 700) / 100.0f;
+
+    Object block = OBJECT::CREATE_OBJECT(
+        voxelBlockModel,
+        x, y, z,
+        false, false, true, false, false
+    );
+
+    if (block && ENTITY::DOES_ENTITY_EXIST(block)) {
+        ENTITY::SET_ENTITY_AS_MISSION_ENTITY(block, true, true);
+        chaosBlocks.push_back(block);
+    }
+
+    while (chaosBlocks.size() > 18) {
+        Object oldest = chaosBlocks.front();
+        if (oldest && ENTITY::DOES_ENTITY_EXIST(oldest)) {
+            OBJECT::DELETE_OBJECT(&oldest);
+        }
+        chaosBlocks.erase(chaosBlocks.begin());
+    }
+}
+
+void chaosShockwave(Ped playerPed) {
+    if (!chaosEnabled) return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (now < nextShockwave) return;
+    nextShockwave = now + 2600;
+
+    const Vector3 center = ENTITY::GET_ENTITY_COORDS(playerPed, NULL, true);
+
+    Ped peds[256]{};
+    const int count = worldGetAllPeds(peds, 256);
+
+    for (int i = 0; i < count; ++i) {
+        Ped p = peds[i];
+        if (!p || p == playerPed || !ENTITY::DOES_ENTITY_EXIST(p) || ENTITY::IS_ENTITY_DEAD(p)) continue;
+
+        const Vector3 q = ENTITY::GET_ENTITY_COORDS(p, NULL, true);
+        const float dx = q.x - center.x;
+        const float dy = q.y - center.y;
+        const float dist2 = dx * dx + dy * dy;
+
+        if (dist2 < 0.25f || dist2 > 144.0f) continue;
+
+        const float invLen = 1.0f / std::sqrt(dist2);
+        ENTITY::APPLY_FORCE_TO_ENTITY(
+            p,
+            1,
+            dx * invLen * 12.0f,
+            dy * invLen * 12.0f,
+            2.5f,
+            0.0f, 0.0f, 0.0f,
+            0,
+            true, true, true, true, true
+        );
+    }
+}
+
+void updateChaosWorld(Ped playerPed) {
+    if (!chaosEnabled) {
+        MISC::SET_TIME_SCALE(1.0f);
+        return;
+    }
+
+    const ULONGLONG now = GetTickCount64();
+
+    // "LSD pulse": world speed smoothly cycles between ~0.45x and 1.0x.
+    const float phase = static_cast<float>(now % 7000) / 7000.0f;
+    const float pulse = 0.725f + 0.275f * std::sin(phase * 6.2831853f);
+    MISC::SET_TIME_SCALE(std::clamp(pulse, 0.45f, 1.0f));
+
+    // Player size breathes a little instead of destroying the camera with 4x scale.
+    const float sizePulse = giantScale + 0.12f * std::sin(phase * 12.5663706f);
+    PED::_SET_PED_SCALE(playerPed, std::clamp(sizePulse, 1.15f, 1.60f));
+
+    spawnVoxelRain(playerPed);
+    chaosShockwave(playerPed);
+}
+
 void keyboard(DWORD key, WORD, BYTE, BOOL, BOOL, BOOL wasDown, BOOL up) {
     if (key == 'W') { forwardHeld.store(!up); return; }
     if (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT) {
@@ -322,6 +452,7 @@ void keyboard(DWORD key, WORD, BYTE, BOOL, BOOL, BOOL wasDown, BOOL up) {
 
     if (key == VK_F6) events.fetch_or(ToggleFlash);
     if (key == VK_F9) events.fetch_or(Emergency);
+    if (key == VK_F11) events.fetch_or(ToggleChaos);
     if (key == VK_F10) {
         trafficEnabled = !trafficEnabled;
         if (!trafficEnabled) cleanupTraffic();
@@ -415,6 +546,8 @@ void scriptMain() {
         static_cast<int>(GetPrivateProfileIntW(L"Flash", L"TurboSpeedMS", 52, iniPath.c_str())), 10, 120));
 
     explosiveBullets = GetPrivateProfileIntW(L"Flash", L"ExplosiveBullets", 1, iniPath.c_str()) != 0;
+    chaosEnabled = GetPrivateProfileIntW(L"Chaos", L"Enabled", 1, iniPath.c_str()) != 0;
+    voxelBlockModel = MISC::GET_HASH_KEY("p_crate03x");
     const int giantScalePercent = std::clamp(
         static_cast<int>(GetPrivateProfileIntW(L"Flash", L"GiantScalePercent", 135, iniPath.c_str())), 100, 400);
     giantScale = static_cast<float>(giantScalePercent) / 100.0f;
@@ -457,7 +590,7 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v13.2 traffic-fixed single-ASI started; Story Mode only");
+    log("FlashRDR2 v14 LSD CHAOS FINAL started; Story Mode only");
 
     auto lastTick = std::chrono::steady_clock::now();
     ULONGLONG nextTrafficScan = 0;
@@ -478,6 +611,16 @@ void scriptMain() {
             resetEffects("F9 emergency");
             enabled = false;
             status = "OFF - F6 enable";
+        }
+
+        if (ev & ToggleChaos) {
+            chaosEnabled = !chaosEnabled;
+            if (!chaosEnabled) {
+                cleanupChaosBlocks();
+                MISC::SET_TIME_SCALE(1.0f);
+                if (!chaosEnabled) PED::_SET_PED_SCALE(ped, giantScale);
+            }
+            log(chaosEnabled ? "chaos on" : "chaos off");
         }
 
         if (ev & ToggleFlash) {
@@ -504,11 +647,16 @@ void scriptMain() {
             nextTrafficScan = nowTrafficMs + 500;
         }
 
+        if (ped && ENTITY::DOES_ENTITY_EXIST(ped) && !online()) {
+            updateChaosWorld(ped);
+        }
+
         if (!enabled) {
-            static char trafficOnlyHud[192];
+            static char trafficOnlyHud[224];
             sprintf_s(
                 trafficOnlyHud,
-                "FLASH OFF | TRAFFIC %s | converted %u | F10 traffic",
+                "FLASH OFF | CHAOS %s | TRAFFIC %s | converted %u | F11 chaos",
+                chaosEnabled ? "LSD ON" : "OFF",
                 trafficEnabled ? (addonCarAvailable ? "ADDON CAR" : "BUGGY01 FALLBACK") : "OFF",
                 static_cast<unsigned>(trafficShells.size())
             );
@@ -531,6 +679,8 @@ void scriptMain() {
 
         updateExplosiveBullets(ped);
 
+        updateChaosWorld(ped);
+
         MISC::SET_SUPER_JUMP_THIS_FRAME(player);
         updateFlashRun(ped);
 
@@ -539,7 +689,7 @@ void scriptMain() {
         static char hud[256];
         sprintf_s(
             hud,
-            "FLASH v13.2 | %s | %.0f km/h | SCALE %.2fx | TRAFFIC %s | GODMODE | INF STAMINA | F10 traffic",
+            "FLASH v14 LSD | %s | %.0f km/h | SCALE %.2fx | TRAFFIC %s | GODMODE | INF STAMINA | F10 traffic | F11 LSD",
             sprintHeld.load() ? "MAX TURBO" : "SUPER RUN",
             kmh,
             giantScale,
