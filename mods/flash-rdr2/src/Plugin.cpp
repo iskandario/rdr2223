@@ -29,6 +29,7 @@ float targetSpeed = 32.0f;
 float acceleration = 24.0f;
 float deceleration = 36.0f;
 float worldTimeScale = 0.72f;
+float sprintBoostMultiplier = 2.50f;
 float currentBoost = 0.0f;
 
 Hash originalModel = 0;
