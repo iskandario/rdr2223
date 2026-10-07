@@ -1,32 +1,31 @@
-# FlashRDR2 v13 — SINGLE ASI + sane scale + integrated traffic
+# FlashRDR2 v13.2 — TRAFFIC FIX
 
-Why v12 looked broken:
-- 4.25x PED scale stretches the skeleton/clothes/hair, but RDR2 camera offsets do not scale with it.
-- That is why the camera was inside the shoulder/body and hair/clothing looked deformed.
+This fixes the reason cars were not appearing in v13.1.
 
-v13 defaults to 1.35x. It is still visibly larger than NPCs without wrecking the camera rig.
+The traffic scanner used to run only after Flash mode (F6) was enabled.
+v13.2 moves traffic processing outside the Flash-mode branch, so it runs all the time
+in Story Mode.
 
-Everything is now inside ONE `FlashRDR2.asi`.
-There is no second TrafficCars.asi to forget to build/install.
+Changes:
+- Traffic works even with Flash powers OFF.
+- Scan interval reduced to 500 ms.
+- TrafficPercent defaults to 100 for easy testing.
+- If `ironroadster` is not installed, the mod uses the known base-game BUGGY01 hash
+  (0xB3C45542).
+- Vehicle shells are made mission entities and explicitly visible before attachment.
+- HUD shows converted traffic count.
 
 Controls:
-- F6: powers on/off
-- W: super run
-- W + Shift: hyper turbo
-- Space: super jump
-- F9: reset
-- F10: traffic conversion on/off
+- F6: Flash powers
+- F10: traffic ON/OFF
+- F9: Flash reset
 
-Traffic behavior:
-- Every ~1.5 sec it scans nearby mounted NPCs.
-- If `ironroadster` addon assets are installed, it hides the horse and attaches that car shell.
-- If the addon car asset is NOT installed, it automatically falls back to the base-game `BUGGY01`
-  shell so you can immediately see that traffic conversion is running.
+Expected test:
+1. Enter Story Mode.
+2. Do NOT press F6.
+3. Ride/walk near NPCs who are already mounted on horses.
+4. Top-left HUD should show `TRAFFIC BUGGY01 FALLBACK` and `converted N`.
+5. Mounted NPCs should get buggy shells attached while their horses are hidden.
 
-IMPORTANT:
-The fallback is an RDR2 buggy, not a modern GTA car. A modern car model physically does not exist
-in the base game. For the actual `ironroadster` modern-car shell you still need the LML vehicle
-assets from RDR2AddonVehicles:
-https://www.nexusmods.com/reddeadredemption2/mods/5285
-
-The Nexus pack is ~478 MB and includes 53 example vehicles.
+For a modern roadster shell instead of BUGGY01, install the external `ironroadster`
+LML assets from RDR2AddonVehicles.

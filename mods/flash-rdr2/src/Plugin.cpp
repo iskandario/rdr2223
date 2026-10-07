@@ -229,6 +229,8 @@ bool attachAddonCarShell(Ped mount) {
     );
     if (!shell || !ENTITY::DOES_ENTITY_EXIST(shell)) return false;
 
+    ENTITY::SET_ENTITY_AS_MISSION_ENTITY(shell, true, true);
+    ENTITY::SET_ENTITY_VISIBLE(shell, true);
     ENTITY::SET_ENTITY_COLLISION(shell, false, false);
     ENTITY::ATTACH_ENTITY_TO_ENTITY(
         shell, mount, 0,
@@ -262,6 +264,8 @@ bool attachFallbackVehicleShell(Ped mount) {
 
     if (!shell || !ENTITY::DOES_ENTITY_EXIST(shell)) return false;
 
+    ENTITY::SET_ENTITY_AS_MISSION_ENTITY(shell, true, true);
+    ENTITY::SET_ENTITY_VISIBLE(shell, true);
     ENTITY::SET_ENTITY_COLLISION(shell, false, false);
     ENTITY::ATTACH_ENTITY_TO_ENTITY(
         shell, mount, 0,
@@ -424,7 +428,7 @@ void scriptMain() {
     useCustomModel = GetPrivateProfileIntW(L"Flash", L"UseCustomModel", 0, iniPath.c_str()) != 0;
 
     trafficPercent = std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Traffic", L"TrafficPercent", 55, iniPath.c_str())),
+        static_cast<int>(GetPrivateProfileIntW(L"Traffic", L"TrafficPercent", 100, iniPath.c_str())),
         0, 100
     );
 
@@ -441,7 +445,7 @@ void scriptMain() {
     );
 
     addonCarModel = MISC::GET_HASH_KEY(trafficModelUtf8);
-    fallbackVehicleModel = MISC::GET_HASH_KEY("BUGGY01");
+    fallbackVehicleModel = 0xB3C45542; // BUGGY01 known RDR2 vehicle hash
     addonCarAvailable = STREAMING::IS_MODEL_VALID(addonCarModel);
 
     wchar_t modelNameWide[128]{};
@@ -453,7 +457,7 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v13.1 compile-fixed single-ASI traffic started; Story Mode only");
+    log("FlashRDR2 v13.2 traffic-fixed single-ASI started; Story Mode only");
 
     auto lastTick = std::chrono::steady_clock::now();
     ULONGLONG nextTrafficScan = 0;
@@ -492,8 +496,23 @@ void scriptMain() {
         ped = PLAYER::PLAYER_PED_ID();
         player = PLAYER::PLAYER_ID();
 
+        // Traffic is independent from Flash powers. It keeps working even when F6 is OFF.
+        pruneTraffic();
+        const ULONGLONG nowTrafficMs = GetTickCount64();
+        if (trafficEnabled && !online() && nowTrafficMs >= nextTrafficScan) {
+            scanTraffic();
+            nextTrafficScan = nowTrafficMs + 500;
+        }
+
         if (!enabled) {
-            display(status);
+            static char trafficOnlyHud[192];
+            sprintf_s(
+                trafficOnlyHud,
+                "FLASH OFF | TRAFFIC %s | converted %u | F10 traffic",
+                trafficEnabled ? (addonCarAvailable ? "ADDON CAR" : "BUGGY01 FALLBACK") : "OFF",
+                static_cast<unsigned>(trafficShells.size())
+            );
+            display(trafficOnlyHud);
             continue;
         }
 
@@ -515,19 +534,12 @@ void scriptMain() {
         MISC::SET_SUPER_JUMP_THIS_FRAME(player);
         updateFlashRun(ped);
 
-        pruneTraffic();
-        const ULONGLONG nowMs = GetTickCount64();
-        if (trafficEnabled && nowMs >= nextTrafficScan) {
-            scanTraffic();
-            nextTrafficScan = nowMs + 1500;
-        }
-
         const float kmh = ENTITY::GET_ENTITY_SPEED(ped) * 3.6f;
 
         static char hud[256];
         sprintf_s(
             hud,
-            "FLASH v13.1 | %s | %.0f km/h | SCALE %.2fx | TRAFFIC %s | GODMODE | INF STAMINA | F10 traffic",
+            "FLASH v13.2 | %s | %.0f km/h | SCALE %.2fx | TRAFFIC %s | GODMODE | INF STAMINA | F10 traffic",
             sprintHeld.load() ? "MAX TURBO" : "SUPER RUN",
             kmh,
             giantScale,
