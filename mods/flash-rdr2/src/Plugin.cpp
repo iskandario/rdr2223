@@ -90,7 +90,6 @@ void resetEffects(const char* reason) {
     Ped ped = PLAYER::PLAYER_PED_ID();
 
     if (ped && ENTITY::DOES_ENTITY_EXIST(ped)) {
-        PLAYER::SET_RUN_SPRINT_MULTIPLIER_FOR_PLAYER(PLAYER::PLAYER_ID(), 1.0f);
         ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
     }
 
@@ -159,18 +158,18 @@ void scriptMain() {
     logFile.open(directory / L"FlashRDR2.log", std::ios::app);
 
     targetSpeed = static_cast<float>(std::clamp(
-        GetPrivateProfileIntW(L"Flash", L"MaxSpeedMS", 32, iniPath.c_str()), 8, 80));
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"MaxSpeedMS", 32, iniPath.c_str())), 8, 80));
 
     acceleration = static_cast<float>(std::clamp(
-        GetPrivateProfileIntW(L"Flash", L"AccelerationMS2", 24, iniPath.c_str()), 4, 100));
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"AccelerationMS2", 24, iniPath.c_str())), 4, 100));
 
     deceleration = static_cast<float>(std::clamp(
-        GetPrivateProfileIntW(L"Flash", L"DecelerationMS2", 36, iniPath.c_str()), 4, 150));
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"DecelerationMS2", 36, iniPath.c_str())), 4, 150));
 
     slowWorld = GetPrivateProfileIntW(L"Flash", L"SlowWorld", 1, iniPath.c_str()) != 0;
 
     const int timeScalePercent = std::clamp(
-        GetPrivateProfileIntW(L"Flash", L"WorldTimeScalePercent", 72, iniPath.c_str()), 35, 100);
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"WorldTimeScalePercent", 72, iniPath.c_str())), 35, 100);
 
     worldTimeScale = static_cast<float>(timeScalePercent) / 100.0f;
     useCustomModel = GetPrivateProfileIntW(L"Flash", L"UseCustomModel", 0, iniPath.c_str()) != 0;
@@ -238,8 +237,6 @@ void scriptMain() {
             continue;
         }
 
-        PLAYER::SET_RUN_SPRINT_MULTIPLIER_FOR_PLAYER(PLAYER::PLAYER_ID(), 1.49f);
-
         const bool accelerating =
             forwardHeld.load()
             && sprintHeld.load()
@@ -255,7 +252,7 @@ void scriptMain() {
 
         if (currentBoost > 0.05f) {
             const Vector3 forward = ENTITY::GET_ENTITY_FORWARD_VECTOR(ped);
-            const Vector3 velocity = ENTITY::GET_ENTITY_VELOCITY(ped);
+            const Vector3 velocity = ENTITY::GET_ENTITY_VELOCITY(ped, 0);
 
             const float planarLength = std::sqrt(
                 forward.x * forward.x + forward.y * forward.y);

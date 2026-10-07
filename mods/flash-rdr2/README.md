@@ -13,7 +13,6 @@ Default target boost: 32 m/s (~115 km/h).
 The mod adds:
 - smooth acceleration/deceleration
 - forward velocity boost
-- normal sprint multiplier boost
 - motion blur
 - optional world slow-motion
 - optional external custom Flash ped model
