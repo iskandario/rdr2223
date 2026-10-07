@@ -5,8 +5,6 @@
 #include <natives.h>
 #include <algorithm>
 #include <atomic>
-#include <chrono>
-#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -21,16 +19,11 @@ constexpr unsigned Toggle = 1;
 constexpr unsigned Emergency = 2;
 
 bool enabled = false;
-bool slowWorld = true;
 bool useCustomModel = false;
 bool modelApplied = false;
 
-float targetSpeed = 32.0f;
-float acceleration = 24.0f;
-float deceleration = 36.0f;
-float worldTimeScale = 0.72f;
-float sprintBoostMultiplier = 2.50f;
-float currentBoost = 0.0f;
+float runRate = 6.0f;
+float turboRate = 10.0f;
 
 Hash originalModel = 0;
 Hash customModel = 0;
@@ -58,8 +51,7 @@ bool eligible(Ped ped) {
     if (!focused() || online() || HUD::IS_PAUSE_MENU_ACTIVE() || !CAM::IS_SCREEN_FADED_IN()) return false;
     if (!ped || !ENTITY::DOES_ENTITY_EXIST(ped) || ped != PLAYER::PLAYER_PED_ID() || ENTITY::IS_ENTITY_DEAD(ped)) return false;
     if (!PLAYER::IS_PLAYER_CONTROL_ON(PLAYER::PLAYER_ID())) return false;
-    if (PED::IS_PED_ON_MOUNT(ped) || PED::IS_PED_IN_ANY_VEHICLE(ped, false)
-        || PED::IS_PED_SWIMMING(ped) || PED::IS_PED_RAGDOLL(ped)) return false;
+    if (PED::IS_PED_ON_MOUNT(ped) || PED::IS_PED_IN_ANY_VEHICLE(ped, false) || PED::IS_PED_SWIMMING(ped)) return false;
     return true;
 }
 
@@ -88,14 +80,18 @@ void restoreOriginalModel() {
 }
 
 void resetEffects(const char* reason) {
+    Player player = PLAYER::PLAYER_ID();
     Ped ped = PLAYER::PLAYER_PED_ID();
 
+    PLAYER::SET_PLAYER_INVINCIBLE(player, false);
+
     if (ped && ENTITY::DOES_ENTITY_EXIST(ped)) {
+        PED::SET_PED_CAN_RAGDOLL(ped, true);
+        PED::SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0f);
         ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
     }
 
     MISC::SET_TIME_SCALE(1.0f);
-    currentBoost = 0.0f;
     restoreOriginalModel();
 
     if (reason) log(std::string("reset: ") + reason);
@@ -110,7 +106,7 @@ void tryApplyCustomModel() {
     originalModel = ENTITY::GET_ENTITY_MODEL(ped);
 
     if (!STREAMING::IS_MODEL_VALID(customModel)) {
-        status = "Flash model unavailable; speed enabled without model";
+        status = "Custom model unavailable; Flash powers still ON";
         log("custom model invalid/unavailable");
         return;
     }
@@ -121,7 +117,7 @@ void tryApplyCustomModel() {
     while (!STREAMING::HAS_MODEL_LOADED(customModel) && GetTickCount64() < deadline) WAIT(0);
 
     if (!STREAMING::HAS_MODEL_LOADED(customModel)) {
-        status = "Flash model timed out; speed enabled without model";
+        status = "Custom model timed out; Flash powers still ON";
         log("custom model load timeout");
         return;
     }
@@ -158,53 +154,33 @@ void scriptMain() {
 
     logFile.open(directory / L"FlashRDR2.log", std::ios::app);
 
-    targetSpeed = static_cast<float>(std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"MaxSpeedMS", 32, iniPath.c_str())), 8, 80));
+    const int runRatePercent = std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"RunRatePercent", 600, iniPath.c_str())), 100, 1000);
+    const int turboRatePercent = std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"TurboRatePercent", 1000, iniPath.c_str())), 100, 1000);
 
-    acceleration = static_cast<float>(std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"AccelerationMS2", 24, iniPath.c_str())), 4, 100));
-
-    deceleration = static_cast<float>(std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"DecelerationMS2", 36, iniPath.c_str())), 4, 150));
-
-    slowWorld = GetPrivateProfileIntW(L"Flash", L"SlowWorld", 1, iniPath.c_str()) != 0;
-
-    const int timeScalePercent = std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"WorldTimeScalePercent", 72, iniPath.c_str())), 35, 100);
-
-    worldTimeScale = static_cast<float>(timeScalePercent) / 100.0f;
-
-    const int sprintBoostPercent = std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"SprintBoostPercent", 175, iniPath.c_str())), 100, 400);
-    sprintBoostMultiplier = static_cast<float>(sprintBoostPercent) / 100.0f;
+    runRate = static_cast<float>(runRatePercent) / 100.0f;
+    turboRate = static_cast<float>(turboRatePercent) / 100.0f;
 
     useCustomModel = GetPrivateProfileIntW(L"Flash", L"UseCustomModel", 0, iniPath.c_str()) != 0;
 
     wchar_t modelNameWide[128]{};
-    GetPrivateProfileStringW(
-        L"Flash", L"CustomModelName", L"", modelNameWide, 128, iniPath.c_str());
+    GetPrivateProfileStringW(L"Flash", L"CustomModelName", L"", modelNameWide, 128, iniPath.c_str());
 
     if (modelNameWide[0] != L'\0') {
         char modelNameUtf8[128]{};
-        WideCharToMultiByte(
-            CP_UTF8, 0, modelNameWide, -1, modelNameUtf8, 128, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, modelNameWide, -1, modelNameUtf8, 128, nullptr, nullptr);
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 0.2.0 started; Story Mode only");
-
-    auto lastTick = std::chrono::steady_clock::now();
+    log("FlashRDR2 v5 started; Story Mode only");
 
     for (;;) {
         WAIT(0);
 
-        const auto now = std::chrono::steady_clock::now();
-        float dt = std::chrono::duration<float>(now - lastTick).count();
-        lastTick = now;
-        dt = std::clamp(dt, 0.0f, 0.05f);
-
         const unsigned ev = events.exchange(0);
         Ped ped = PLAYER::PLAYER_PED_ID();
+        Player player = PLAYER::PLAYER_ID();
 
         if (ev & Emergency) {
             resetEffects("F9 emergency");
@@ -219,9 +195,8 @@ void scriptMain() {
                 status = "OFF - F6 enable";
             } else if (eligible(ped)) {
                 enabled = true;
-                currentBoost = 0.0f;
                 tryApplyCustomModel();
-                status = "FLASH ON | W run | Shift turbo | F6 off | F9 emergency";
+                status = "FLASH ON | W run | Shift TURBO | Space SUPER JUMP | F6 off";
                 log("enabled");
             } else {
                 status = "Cannot enable here | Story Mode + on foot + game focused";
@@ -229,6 +204,7 @@ void scriptMain() {
         }
 
         ped = PLAYER::PLAYER_PED_ID();
+        player = PLAYER::PLAYER_ID();
 
         if (!enabled) {
             display(status);
@@ -243,61 +219,33 @@ void scriptMain() {
             continue;
         }
 
-        // Flash mode: keep player stamina full every frame.
-        PLAYER::RESTORE_PLAYER_STAMINA(PLAYER::PLAYER_ID(), 100.0f);
+        PLAYER::SET_PLAYER_INVINCIBLE(player, true);
+        PLAYER::RESTORE_PLAYER_STAMINA(player, 1.0f);
+        PED::SET_PED_CAN_RAGDOLL(ped, false);
 
-        const bool accelerating =
-            forwardHeld.load()
-            && !PED::IS_PED_FALLING(ped)
-            && !PED::IS_PED_JUMPING(ped)
-            && !PED::IS_PED_CLIMBING(ped);
+        MISC::SET_SUPER_JUMP_THIS_FRAME(player);
 
-        const float activeTargetSpeed =
-            sprintHeld.load() ? (targetSpeed * sprintBoostMultiplier) : targetSpeed;
+        const bool moving = forwardHeld.load();
+        const bool turbo = moving && sprintHeld.load();
 
-        if (accelerating) {
-            currentBoost = std::min(activeTargetSpeed, currentBoost + acceleration * dt);
-        } else {
-            currentBoost = std::max(0.0f, currentBoost - deceleration * dt);
-        }
-
-        if (currentBoost > 0.05f) {
-            const Vector3 forward = ENTITY::GET_ENTITY_FORWARD_VECTOR(ped);
-            const Vector3 velocity = ENTITY::GET_ENTITY_VELOCITY(ped, 0);
-
-            const float planarLength = std::sqrt(
-                forward.x * forward.x + forward.y * forward.y);
-
-            if (planarLength > 0.001f) {
-                const float nx = forward.x / planarLength;
-                const float ny = forward.y / planarLength;
-                const float z = std::clamp(velocity.z, -10.0f, 8.0f);
-
-                ENTITY::SET_ENTITY_VELOCITY(
-                    ped,
-                    nx * currentBoost,
-                    ny * currentBoost,
-                    z
-                );
-            }
-
+        if (moving) {
+            PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? turboRate : runRate);
             ENTITY::SET_ENTITY_MOTION_BLUR(ped, true);
-
-            if (slowWorld) {
-                MISC::SET_TIME_SCALE(worldTimeScale);
-            }
         } else {
+            PED::SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0f);
             ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
-            MISC::SET_TIME_SCALE(1.0f);
         }
+
+        MISC::SET_TIME_SCALE(1.0f);
 
         const float kmh = ENTITY::GET_ENTITY_SPEED(ped) * 3.6f;
 
-        static char hud[192];
+        static char hud[224];
         sprintf_s(
             hud,
-            "FLASH ON | %.0f km/h | hold W + Shift | F6 off | F9 emergency",
-            kmh
+            "FLASH v5 | %.0f km/h | %s | INVINCIBLE | INF STAMINA | SUPER JUMP | F9 reset",
+            kmh,
+            turbo ? "TURBO" : (moving ? "RUN" : "READY")
         );
 
         display(hud);
