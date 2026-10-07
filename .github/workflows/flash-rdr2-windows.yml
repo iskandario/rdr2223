@@ -1,0 +1,135 @@
+name: Build FlashRDR2 Windows x64
+
+on:
+  push:
+    paths:
+      - 'mods/flash-rdr2/**'
+      - '.github/workflows/flash-rdr2-windows.yml'
+  pull_request:
+    paths:
+      - 'mods/flash-rdr2/**'
+      - '.github/workflows/flash-rdr2-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned ScriptHookRDR2 SDK
+        shell: pwsh
+        run: |
+          git clone https://github.com/Smerdokryl/RDR2_SDK.git "$env:RUNNER_TEMP/rdr2-sdk"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "SDK clone failed"
+          }
+
+          git -C "$env:RUNNER_TEMP/rdr2-sdk" checkout --detach ef53fc71e0ad95cfa8e72a63f15e1c6aa38091de
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "SDK pin failed"
+          }
+
+      - name: Check project files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "mods/flash-rdr2/CMakeLists.txt")) {
+            throw "Missing mods/flash-rdr2/CMakeLists.txt"
+          }
+
+          if (-not (Test-Path "mods/flash-rdr2/src/Plugin.cpp")) {
+            throw "Missing mods/flash-rdr2/src/Plugin.cpp"
+          }
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake `
+            -S mods/flash-rdr2 `
+            -B build-flash `
+            -A x64 `
+            "-DRDR2_SDK=$env:RUNNER_TEMP/rdr2-sdk/SDK"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Configure failed"
+          }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build-flash --config Release
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build failed"
+          }
+
+      - name: Validate installer syntax
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errorsFound = $null
+
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            "$pwd/mods/flash-rdr2/Install.ps1",
+            [ref]$tokens,
+            [ref]$errorsFound
+          )
+
+          if ($errorsFound.Count) {
+            throw ($errorsFound | Out-String)
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $stage = New-Item `
+            -ItemType Directory `
+            -Path package-flash `
+            -Force
+
+          Copy-Item `
+            build-flash/Release/FlashRDR2.asi `
+            $stage
+
+          foreach ($file in @(
+            "FlashRDR2.ini",
+            "INSTALL.cmd",
+            "Install.ps1",
+            "README.md"
+          )) {
+            Copy-Item `
+              "mods/flash-rdr2/$file" `
+              $stage
+          }
+
+          $lines = Get-ChildItem $stage -File |
+            Sort-Object Name |
+            ForEach-Object {
+              "{0}  {1}" -f `
+                (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),
+                $_.Name
+            }
+
+          $lines |
+            Set-Content `
+              package-flash/SHA256SUMS.txt `
+              -Encoding ascii
+
+          Compress-Archive `
+            -Path package-flash/* `
+            -DestinationPath FlashRDR2-Windows-x64-experimental.zip `
+            -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlashRDR2-Windows-x64-experimental
+          path: FlashRDR2-Windows-x64-experimental.zip
+          if-no-files-found: error
