@@ -172,6 +172,11 @@ void scriptMain() {
         static_cast<int>(GetPrivateProfileIntW(L"Flash", L"WorldTimeScalePercent", 72, iniPath.c_str())), 35, 100);
 
     worldTimeScale = static_cast<float>(timeScalePercent) / 100.0f;
+
+    const int sprintBoostPercent = std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"SprintBoostPercent", 175, iniPath.c_str())), 100, 400);
+    sprintBoostMultiplier = static_cast<float>(sprintBoostPercent) / 100.0f;
+
     useCustomModel = GetPrivateProfileIntW(L"Flash", L"UseCustomModel", 0, iniPath.c_str()) != 0;
 
     wchar_t modelNameWide[128]{};
@@ -215,7 +220,7 @@ void scriptMain() {
                 enabled = true;
                 currentBoost = 0.0f;
                 tryApplyCustomModel();
-                status = "FLASH ON | hold W + Shift | F6 off | F9 emergency";
+                status = "FLASH ON | W run | Shift turbo | F6 off | F9 emergency";
                 log("enabled");
             } else {
                 status = "Cannot enable here | Story Mode + on foot + game focused";
@@ -237,15 +242,20 @@ void scriptMain() {
             continue;
         }
 
+        // Flash mode: keep player stamina full every frame.
+        PLAYER::RESTORE_PLAYER_STAMINA(PLAYER::PLAYER_ID(), 100.0f);
+
         const bool accelerating =
             forwardHeld.load()
-            && sprintHeld.load()
             && !PED::IS_PED_FALLING(ped)
             && !PED::IS_PED_JUMPING(ped)
             && !PED::IS_PED_CLIMBING(ped);
 
+        const float activeTargetSpeed =
+            sprintHeld.load() ? (targetSpeed * sprintBoostMultiplier) : targetSpeed;
+
         if (accelerating) {
-            currentBoost = std::min(targetSpeed, currentBoost + acceleration * dt);
+            currentBoost = std::min(activeTargetSpeed, currentBoost + acceleration * dt);
         } else {
             currentBoost = std::max(0.0f, currentBoost - deceleration * dt);
         }

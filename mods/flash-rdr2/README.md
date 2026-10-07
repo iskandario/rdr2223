@@ -46,3 +46,18 @@ Do not use ASI mods in Red Dead Online.
 
 Status:
 This is an experimental source build and still needs a real Windows compile + in-game test.
+
+
+## v2 controls
+- F6: Flash mode on/off
+- W: continuous super run
+- Shift: turbo boost
+- Space: normal jump, no standalone speed impulse
+- F9: emergency reset
+- External Flash ped/model can be enabled in FlashRDR2.ini via UseCustomModel=1 and CustomModelName=...
+
+## v3 additions
+- Infinite player stamina while Flash mode is enabled (RESTORE_PLAYER_STAMINA every frame).
+- Stronger continuous turbo: Shift uses 250% of base Flash target speed.
+- Default base target speed: 55 m/s.
+- Costume/model support remains external: set UseCustomModel=1 and CustomModelName=<registered ped model name>.
