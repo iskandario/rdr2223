@@ -5,31 +5,47 @@
 #include <natives.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
 
 namespace {
 HMODULE moduleHandle{};
+
 std::atomic<unsigned> events{0};
 std::atomic<bool> forwardHeld{false};
+std::atomic<bool> backwardHeld{false};
 std::atomic<bool> sprintHeld{false};
+std::atomic<bool> jumpHeld{false};
+std::atomic<bool> downHeld{false};
 
-constexpr unsigned Toggle = 1;
+constexpr unsigned ToggleFlash = 1;
 constexpr unsigned Emergency = 2;
+constexpr unsigned ToggleFlight = 4;
 
 bool enabled = false;
+bool flightMode = false;
+bool explosiveBullets = true;
 bool useCustomModel = false;
 bool modelApplied = false;
 
-float runRate = 6.0f;
-float turboRate = 10.0f;
+float runSpeed = 24.0f;
+float turboSpeed = 52.0f;
+float flightSpeed = 32.0f;
+float flightVerticalSpeed = 20.0f;
+float runAnimRate = 2.5f;
+float turboAnimRate = 4.0f;
 
 Hash originalModel = 0;
 Hash customModel = 0;
 
+Vector3 lastImpact{};
+bool haveLastImpact = false;
+
 std::ofstream logFile;
-const char* status = "F6 enable Flash mode | Story Mode only";
+const char* status = "F6 Flash | F7 flight | F9 reset";
 
 void log(const std::string& text) {
     if (logFile) logFile << GetTickCount64() << " " << text << std::endl;
@@ -89,9 +105,13 @@ void resetEffects(const char* reason) {
         PED::SET_PED_CAN_RAGDOLL(ped, true);
         PED::SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0f);
         ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
+        ENTITY::SET_ENTITY_HAS_GRAVITY(ped, true);
+        ENTITY::SET_ENTITY_VELOCITY(ped, 0.0f, 0.0f, 0.0f);
     }
 
     MISC::SET_TIME_SCALE(1.0f);
+    flightMode = false;
+    haveLastImpact = false;
     restoreOriginalModel();
 
     if (reason) log(std::string("reset: ") + reason);
@@ -106,7 +126,7 @@ void tryApplyCustomModel() {
     originalModel = ENTITY::GET_ENTITY_MODEL(ped);
 
     if (!STREAMING::IS_MODEL_VALID(customModel)) {
-        status = "Custom model unavailable; Flash powers still ON";
+        status = "Custom model unavailable; powers ON";
         log("custom model invalid/unavailable");
         return;
     }
@@ -117,7 +137,7 @@ void tryApplyCustomModel() {
     while (!STREAMING::HAS_MODEL_LOADED(customModel) && GetTickCount64() < deadline) WAIT(0);
 
     if (!STREAMING::HAS_MODEL_LOADED(customModel)) {
-        status = "Custom model timed out; Flash powers still ON";
+        status = "Custom model timed out; powers ON";
         log("custom model load timeout");
         return;
     }
@@ -129,20 +149,131 @@ void tryApplyCustomModel() {
 }
 
 void keyboard(DWORD key, WORD, BYTE, BOOL, BOOL, BOOL wasDown, BOOL up) {
-    if (key == 'W') {
-        forwardHeld.store(!up);
-        return;
-    }
+    if (key == 'W') { forwardHeld.store(!up); return; }
+    if (key == 'S') { backwardHeld.store(!up); return; }
 
     if (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT) {
         sprintHeld.store(!up);
         return;
     }
 
+    if (key == VK_SPACE) {
+        jumpHeld.store(!up);
+        return;
+    }
+
+    if (key == VK_CONTROL || key == VK_LCONTROL || key == VK_RCONTROL) {
+        downHeld.store(!up);
+        return;
+    }
+
     if (up || wasDown) return;
 
-    if (key == VK_F6) events.fetch_or(Toggle);
+    if (key == VK_F6) events.fetch_or(ToggleFlash);
+    if (key == VK_F7) events.fetch_or(ToggleFlight);
     if (key == VK_F9) events.fetch_or(Emergency);
+}
+
+void updateExplosiveBullets(Ped ped) {
+    if (!explosiveBullets || !PED::IS_PED_SHOOTING(ped)) return;
+
+    Vector3 impact{};
+    if (!WEAPON::GET_PED_LAST_WEAPON_IMPACT_COORD(ped, &impact)) return;
+
+    bool isNew = !haveLastImpact
+        || std::fabs(impact.x - lastImpact.x) > 0.15f
+        || std::fabs(impact.y - lastImpact.y) > 0.15f
+        || std::fabs(impact.z - lastImpact.z) > 0.15f;
+
+    if (!isNew) return;
+
+    lastImpact = impact;
+    haveLastImpact = true;
+
+    FIRE::ADD_OWNED_EXPLOSION(
+        ped,
+        impact.x, impact.y, impact.z,
+        25,
+        1.0f,
+        true,
+        false,
+        0.25f
+    );
+}
+
+void updateFlight(Ped ped, float dt) {
+    ENTITY::SET_ENTITY_HAS_GRAVITY(ped, false);
+    PED::SET_PED_CAN_RAGDOLL(ped, false);
+    ENTITY::SET_ENTITY_VELOCITY(ped, 0.0f, 0.0f, 0.0f);
+
+    Vector3 pos = ENTITY::GET_ENTITY_COORDS(ped, true, false);
+    Vector3 forward = ENTITY::GET_ENTITY_FORWARD_VECTOR(ped);
+
+    float len = std::sqrt(forward.x * forward.x + forward.y * forward.y);
+    if (len < 0.001f) len = 1.0f;
+
+    const float nx = forward.x / len;
+    const float ny = forward.y / len;
+
+    float speed = flightSpeed * (sprintHeld.load() ? 2.0f : 1.0f);
+
+    if (forwardHeld.load()) {
+        pos.x += nx * speed * dt;
+        pos.y += ny * speed * dt;
+    }
+    if (backwardHeld.load()) {
+        pos.x -= nx * speed * dt;
+        pos.y -= ny * speed * dt;
+    }
+    if (jumpHeld.load()) pos.z += flightVerticalSpeed * dt;
+    if (downHeld.load()) pos.z -= flightVerticalSpeed * dt;
+
+    ENTITY::SET_ENTITY_COORDS_NO_OFFSET(ped, pos.x, pos.y, pos.z, false, false, false);
+    ENTITY::SET_ENTITY_MOTION_BLUR(ped, forwardHeld.load() || backwardHeld.load());
+}
+
+void updateFlashRun(Ped ped, float dt) {
+    ENTITY::SET_ENTITY_HAS_GRAVITY(ped, true);
+
+    const bool groundedRun =
+        forwardHeld.load()
+        && !PED::IS_PED_FALLING(ped)
+        && !PED::IS_PED_JUMPING(ped)
+        && !PED::IS_PED_RAGDOLL(ped)
+        && !PED::IS_PED_CLIMBING(ped);
+
+    if (!groundedRun) {
+        PED::SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0f);
+        ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
+        return;
+    }
+
+    const bool turbo = sprintHeld.load();
+    const float speed = turbo ? turboSpeed : runSpeed;
+
+    // Important: move the ped in small coordinate steps instead of applying physics force/velocity.
+    // The game's own run animation keeps playing, so this looks like fast running instead of a long jump.
+    PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? turboAnimRate : runAnimRate);
+
+    Vector3 pos = ENTITY::GET_ENTITY_COORDS(ped, true, false);
+    Vector3 forward = ENTITY::GET_ENTITY_FORWARD_VECTOR(ped);
+
+    const float planarLength = std::sqrt(forward.x * forward.x + forward.y * forward.y);
+    if (planarLength > 0.001f) {
+        const float nx = forward.x / planarLength;
+        const float ny = forward.y / planarLength;
+        const float step = speed * dt;
+
+        ENTITY::SET_ENTITY_COORDS_NO_OFFSET(
+            ped,
+            pos.x + nx * step,
+            pos.y + ny * step,
+            pos.z,
+            false, false, false
+        );
+    }
+
+    ENTITY::SET_ENTITY_MOTION_BLUR(ped, true);
 }
 
 void scriptMain() {
@@ -154,14 +285,19 @@ void scriptMain() {
 
     logFile.open(directory / L"FlashRDR2.log", std::ios::app);
 
-    const int runRatePercent = std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"RunRatePercent", 600, iniPath.c_str())), 100, 1000);
-    const int turboRatePercent = std::clamp(
-        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"TurboRatePercent", 1000, iniPath.c_str())), 100, 1000);
+    runSpeed = static_cast<float>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"RunSpeedMS", 24, iniPath.c_str())), 5, 60));
 
-    runRate = static_cast<float>(runRatePercent) / 100.0f;
-    turboRate = static_cast<float>(turboRatePercent) / 100.0f;
+    turboSpeed = static_cast<float>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"TurboSpeedMS", 52, iniPath.c_str())), 10, 120));
 
+    flightSpeed = static_cast<float>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"FlightSpeedMS", 32, iniPath.c_str())), 5, 100));
+
+    flightVerticalSpeed = static_cast<float>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"FlightVerticalSpeedMS", 20, iniPath.c_str())), 5, 60));
+
+    explosiveBullets = GetPrivateProfileIntW(L"Flash", L"ExplosiveBullets", 1, iniPath.c_str()) != 0;
     useCustomModel = GetPrivateProfileIntW(L"Flash", L"UseCustomModel", 0, iniPath.c_str()) != 0;
 
     wchar_t modelNameWide[128]{};
@@ -173,10 +309,17 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v6 started; Story Mode only");
+    log("FlashRDR2 v7 all-in-one started; Story Mode only");
+
+    auto lastTick = std::chrono::steady_clock::now();
 
     for (;;) {
         WAIT(0);
+
+        const auto now = std::chrono::steady_clock::now();
+        float dt = std::chrono::duration<float>(now - lastTick).count();
+        lastTick = now;
+        dt = std::clamp(dt, 0.0f, 0.033f);
 
         const unsigned ev = events.exchange(0);
         Ped ped = PLAYER::PLAYER_PED_ID();
@@ -185,10 +328,10 @@ void scriptMain() {
         if (ev & Emergency) {
             resetEffects("F9 emergency");
             enabled = false;
-            status = "OFF - emergency reset | F6 enable";
+            status = "OFF - F6 enable";
         }
 
-        if (ev & Toggle) {
+        if (ev & ToggleFlash) {
             if (enabled) {
                 resetEffects("F6 disable");
                 enabled = false;
@@ -196,11 +339,18 @@ void scriptMain() {
             } else if (eligible(ped)) {
                 enabled = true;
                 tryApplyCustomModel();
-                status = "FLASH ON | W run | Shift TURBO | Space SUPER JUMP | F6 off";
+                status = "FLASH ON | W run | Shift turbo | F7 flight | Space super jump";
                 log("enabled");
-            } else {
-                status = "Cannot enable here | Story Mode + on foot + game focused";
             }
+        }
+
+        if ((ev & ToggleFlight) && enabled) {
+            flightMode = !flightMode;
+            if (!flightMode) {
+                ENTITY::SET_ENTITY_HAS_GRAVITY(ped, true);
+                ENTITY::SET_ENTITY_VELOCITY(ped, 0.0f, 0.0f, 0.0f);
+            }
+            log(flightMode ? "flight on" : "flight off");
         }
 
         ped = PLAYER::PLAYER_PED_ID();
@@ -212,9 +362,9 @@ void scriptMain() {
         }
 
         if (!eligible(ped)) {
-            resetEffects("unsafe context / player unavailable");
+            resetEffects("unsafe context");
             enabled = false;
-            status = "OFF - unsafe context | return to Story Mode";
+            status = "OFF - unsafe context";
             display(status);
             continue;
         }
@@ -223,61 +373,24 @@ void scriptMain() {
         PLAYER::RESTORE_PLAYER_STAMINA(player, 1.0f);
         PED::SET_PED_CAN_RAGDOLL(ped, false);
 
-        MISC::SET_SUPER_JUMP_THIS_FRAME(player);
+        updateExplosiveBullets(ped);
 
-        const bool moving = forwardHeld.load();
-        const bool turbo = moving && sprintHeld.load();
-        const bool groundedRun =
-            moving
-            && !PED::IS_PED_FALLING(ped)
-            && !PED::IS_PED_JUMPING(ped)
-            && !PED::IS_PED_RAGDOLL(ped)
-            && !PED::IS_PED_CLIMBING(ped);
-
-        if (groundedRun) {
-            // Keep RDR2's running animation, but force real horizontal ground speed.
-            PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? 3.0f : 2.0f);
-
-            const Vector3 forward = ENTITY::GET_ENTITY_FORWARD_VECTOR(ped);
-            const float planarLength = std::sqrt(
-                forward.x * forward.x + forward.y * forward.y);
-
-            if (planarLength > 0.001f) {
-                const float nx = forward.x / planarLength;
-                const float ny = forward.y / planarLength;
-                const float speed = turbo ? 65.0f : 28.0f;
-
-                // Critical fix: Z is forced to zero while grounded.
-                // The old version preserved vertical velocity and could launch the player.
-                ENTITY::SET_ENTITY_VELOCITY(
-                    ped,
-                    nx * speed,
-                    ny * speed,
-                    0.0f
-                );
-            }
-
-            ENTITY::SET_ENTITY_MOTION_BLUR(ped, true);
+        if (flightMode) {
+            updateFlight(ped, dt);
         } else {
-            PED::SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0f);
-
-            if (!moving) {
-                ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
-            }
+            MISC::SET_SUPER_JUMP_THIS_FRAME(player);
+            updateFlashRun(ped, dt);
         }
-
-        MISC::SET_TIME_SCALE(1.0f);
 
         const float kmh = ENTITY::GET_ENTITY_SPEED(ped) * 3.6f;
 
-        static char hud[224];
+        static char hud[256];
         sprintf_s(
             hud,
-            "FLASH v6 | %.0f km/h | %s | GODMODE | INF STAMINA | SUPER JUMP | F9 reset",
-            kmh,
-            turbo ? "TURBO" : (moving ? "RUN" : "READY")
+            "FLASH v7 | %s | %.0f km/h | GODMODE | INF STAMINA | EXPLOSIVE BULLETS | F9 reset",
+            flightMode ? "FLIGHT" : (sprintHeld.load() ? "TURBO RUN" : "RUN"),
+            kmh
         );
-
         display(hud);
     }
 }
@@ -292,6 +405,5 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         keyboardHandlerUnregister(keyboard);
         scriptUnregister(module);
     }
-
     return TRUE;
 }

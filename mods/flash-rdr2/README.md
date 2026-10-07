@@ -1,14 +1,22 @@
-# FlashRDR2 v6
-
-Major movement fix:
-- W now forces REAL horizontal ground speed (~28 m/s / 101 km/h).
-- W + Shift uses turbo (~65 m/s / 234 km/h).
-- Vertical velocity is NOT preserved while ground-running, so the old launch/jump bug is removed.
-- Running animation is still boosted with SET_PED_MOVE_RATE_OVERRIDE.
-- Space remains super jump.
-- F6 toggles Flash mode.
-- F9 emergency reset.
-- Invincibility + infinite stamina remain enabled in Flash mode.
-- Motion blur while speed-running.
+# FlashRDR2 v7 all-in-one
 
 Story Mode only.
+
+Controls:
+- F6: Flash mode on/off
+- W: Flash run
+- W + Shift: turbo run
+- Space: super jump (when flight is OFF)
+- F7: flight mode on/off
+- Flight: W forward, S backward, Space up, Ctrl down, Shift = 2x flight speed
+- F9: emergency reset
+
+Powers:
+- Invincibility
+- Infinite stamina
+- Super jump
+- Flight mode
+- Explosive bullet impacts
+- Motion blur
+- Flash run implemented with small coordinate steps instead of raw velocity/force, specifically to avoid the "long jump" behavior from earlier versions.
+- Optional external custom ped model via FlashRDR2.ini.
