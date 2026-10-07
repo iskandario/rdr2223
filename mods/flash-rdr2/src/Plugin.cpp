@@ -182,8 +182,8 @@ void updateExplosiveBullets(Ped ped) {
 void updateFlashRun(Ped ped) {
     const bool moving =
         forwardHeld.load()
-        && !PED::IS_PED_FALLING(ped)
         && !PED::IS_PED_JUMPING(ped)
+        && !PED::IS_PED_FALLING(ped)
         && !PED::IS_PED_RAGDOLL(ped)
         && !PED::IS_PED_CLIMBING(ped);
 
@@ -193,11 +193,33 @@ void updateFlashRun(Ped ped) {
         return;
     }
 
-    // RDR2 native movement multiplier. 10.0 is the documented upper end
-    // and keeps the normal running/sprinting locomotion instead of teleporting
-    // or applying launch forces.
-    const float rate = sprintHeld.load() ? 10.0f : 7.0f;
-    PED::SET_PED_MOVE_RATE_OVERRIDE(ped, rate);
+    const bool turbo = sprintHeld.load();
+
+    // Same core approach used by open-source RDR2 trainers:
+    // apply local forward force every frame while W is held.
+    // Force Y is "forward" in the entity's local space.
+    const float forceForward = turbo ? 22.0f : 11.0f;
+
+    // Keep native locomotion animation active while force provides the real speed.
+    PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? 3.0f : 2.0f);
+
+    ENTITY::APPLY_FORCE_TO_ENTITY(
+        ped,
+        1,
+        0.0f,
+        forceForward,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0,
+        true,
+        true,
+        true,
+        true,
+        true
+    );
+
     ENTITY::SET_ENTITY_MOTION_BLUR(ped, true);
 }
 
@@ -228,7 +250,7 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v8 real-run started; Story Mode only");
+    log("FlashRDR2 v9 force-run started; Story Mode only");
 
     auto lastTick = std::chrono::steady_clock::now();
 
@@ -293,7 +315,7 @@ void scriptMain() {
         static char hud[256];
         sprintf_s(
             hud,
-            "FLASH v8 | %s | %.0f km/h | GODMODE | INF STAMINA | EXPLOSIVE BULLETS | F9 reset",
+            "FLASH v9 | %s | %.0f km/h | GODMODE | INF STAMINA | EXPLOSIVE BULLETS | F9 reset",
             sprintHeld.load() ? "MAX TURBO" : "SUPER RUN",
             kmh
         );

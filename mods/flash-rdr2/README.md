@@ -1,18 +1,17 @@
-# FlashRDR2 v8 — REAL RUN
+# FlashRDR2 v9 — FORCE RUN
 
-Removed completely:
-- Flight mode
-- Coordinate teleport movement
-- Raw velocity / launch movement
+This version switches to the same core technique used by open-source RDR2 trainers:
+`ENTITY::APPLY_FORCE_TO_ENTITY` in local forward direction every frame while W is held.
 
-Flash run now uses only RDR2's own PED::SET_PED_MOVE_RATE_OVERRIDE every frame.
-This keeps the game's normal grounded running/sprinting locomotion instead of
-making the player fly, T-pose, clip under terrain, or perform a long jump.
+Why:
+- `SET_PED_MOVE_RATE_OVERRIDE` alone did not create enough actual speed in RDR2.
+- Raw velocity and coordinate stepping looked like long jumps / sliding / clipping.
+- Local forward force lets the game keep its grounded locomotion while adding real forward acceleration.
 
 Controls:
 - F6: Flash mode on/off
-- W: super run (7.0 move-rate override)
-- W + Shift: maximum turbo run (10.0 move-rate override)
+- W: fast run
+- W + Shift: turbo run
 - Space: super jump
 - F9: emergency reset
 
@@ -20,7 +19,7 @@ Still included:
 - Invincibility
 - Infinite stamina
 - Explosive bullet impacts
-- Motion blur while running
-- Optional external custom ped model
+- Motion blur
+- Optional external ped model
 
 Story Mode only.
