@@ -222,15 +222,26 @@ bool attachAddonCarShell(Ped mount) {
     if (!modelReady(addonCarModel)) return false;
 
     const Vector3 pos = ENTITY::GET_ENTITY_COORDS(mount, NULL, true);
-    Object shell = OBJECT::CREATE_OBJECT(addonCarModel, pos, true, true, true, false, false);
+    Object shell = OBJECT::CREATE_OBJECT(
+        addonCarModel,
+        pos.x, pos.y, pos.z,
+        true, true, true, false, false
+    );
     if (!shell || !ENTITY::DOES_ENTITY_EXIST(shell)) return false;
 
     ENTITY::SET_ENTITY_COLLISION(shell, false, false);
     ENTITY::ATTACH_ENTITY_TO_ENTITY(
         shell, mount, 0,
-        Vector3(0.0f, 0.15f, -0.70f),
-        Vector3(0.0f, 0.0f, 0.0f),
-        NULL, true, true, false, 0, true, NULL, NULL
+        0.0f, 0.15f, -0.70f,
+        0.0f, 0.0f, 0.0f,
+        false,
+        true,
+        false,
+        false,
+        0,
+        true,
+        false,
+        false
     );
 
     ENTITY::SET_ENTITY_VISIBLE(mount, false);
@@ -254,9 +265,16 @@ bool attachFallbackVehicleShell(Ped mount) {
     ENTITY::SET_ENTITY_COLLISION(shell, false, false);
     ENTITY::ATTACH_ENTITY_TO_ENTITY(
         shell, mount, 0,
-        Vector3(0.0f, -0.25f, -0.55f),
-        Vector3(0.0f, 0.0f, 0.0f),
-        NULL, true, true, false, 0, true, NULL, NULL
+        0.0f, -0.25f, -0.55f,
+        0.0f, 0.0f, 0.0f,
+        false,
+        true,
+        false,
+        false,
+        0,
+        true,
+        false,
+        false
     );
 
     ENTITY::SET_ENTITY_VISIBLE(mount, false);
@@ -435,7 +453,7 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v13 single-ASI traffic started; Story Mode only");
+    log("FlashRDR2 v13.1 compile-fixed single-ASI traffic started; Story Mode only");
 
     auto lastTick = std::chrono::steady_clock::now();
     ULONGLONG nextTrafficScan = 0;
@@ -509,9 +527,11 @@ void scriptMain() {
         static char hud[256];
         sprintf_s(
             hud,
-            "FLASH v13 | %s | %.0f km/h | SCALE %.2fx | TRAFFIC %s | GODMODE | INF STAMINA | F10 traffic",
+            "FLASH v13.1 | %s | %.0f km/h | SCALE %.2fx | TRAFFIC %s | GODMODE | INF STAMINA | F10 traffic",
             sprintHeld.load() ? "MAX TURBO" : "SUPER RUN",
-            kmh
+            kmh,
+            giantScale,
+            trafficEnabled ? (addonCarAvailable ? "ADDON CAR" : "FALLBACK BUGGY") : "OFF"
         );
         display(hud);
     }
