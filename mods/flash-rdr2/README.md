@@ -1,22 +1,26 @@
-# FlashRDR2 v7 all-in-one
+# FlashRDR2 v8 — REAL RUN
 
-Story Mode only.
+Removed completely:
+- Flight mode
+- Coordinate teleport movement
+- Raw velocity / launch movement
+
+Flash run now uses only RDR2's own PED::SET_PED_MOVE_RATE_OVERRIDE every frame.
+This keeps the game's normal grounded running/sprinting locomotion instead of
+making the player fly, T-pose, clip under terrain, or perform a long jump.
 
 Controls:
 - F6: Flash mode on/off
-- W: Flash run
-- W + Shift: turbo run
-- Space: super jump (when flight is OFF)
-- F7: flight mode on/off
-- Flight: W forward, S backward, Space up, Ctrl down, Shift = 2x flight speed
+- W: super run (7.0 move-rate override)
+- W + Shift: maximum turbo run (10.0 move-rate override)
+- Space: super jump
 - F9: emergency reset
 
-Powers:
+Still included:
 - Invincibility
 - Infinite stamina
-- Super jump
-- Flight mode
 - Explosive bullet impacts
-- Motion blur
-- Flash run implemented with small coordinate steps instead of raw velocity/force, specifically to avoid the "long jump" behavior from earlier versions.
-- Optional external custom ped model via FlashRDR2.ini.
+- Motion blur while running
+- Optional external custom ped model
+
+Story Mode only.
