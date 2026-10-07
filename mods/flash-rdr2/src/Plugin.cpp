@@ -96,6 +96,7 @@ void resetEffects(const char* reason) {
 
     if (ped && ENTITY::DOES_ENTITY_EXIST(ped)) {
         PED::SET_PED_CAN_RAGDOLL(ped, true);
+        PED::_SET_PED_SCALE(ped, 1.0f);
         PED::SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0f);
         ENTITY::SET_ENTITY_MOTION_BLUR(ped, false);
         ENTITY::SET_ENTITY_VELOCITY(ped, 0.0f, 0.0f, 0.0f);
@@ -198,10 +199,10 @@ void updateFlashRun(Ped ped) {
     // Same core approach used by open-source RDR2 trainers:
     // apply local forward force every frame while W is held.
     // Force Y is "forward" in the entity's local space.
-    const float forceForward = turbo ? 22.0f : 11.0f;
+    const float forceForward = turbo ? turboForce : runForce;
 
     // Keep native locomotion animation active while force provides the real speed.
-    PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? 3.0f : 2.0f);
+    PED::SET_PED_MOVE_RATE_OVERRIDE(ped, turbo ? 10.0f : 7.0f);
 
     ENTITY::APPLY_FORCE_TO_ENTITY(
         ped,
@@ -239,6 +240,16 @@ void scriptMain() {
         static_cast<int>(GetPrivateProfileIntW(L"Flash", L"TurboSpeedMS", 52, iniPath.c_str())), 10, 120));
 
     explosiveBullets = GetPrivateProfileIntW(L"Flash", L"ExplosiveBullets", 1, iniPath.c_str()) != 0;
+    const int giantScalePercent = std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"GiantScalePercent", 425, iniPath.c_str())), 100, 400);
+    giantScale = static_cast<float>(giantScalePercent) / 100.0f;
+
+    runForce = static_cast<float>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"RunForce", 80, iniPath.c_str())), 5, 150));
+
+    turboForce = static_cast<float>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"Flash", L"TurboForce", 260, iniPath.c_str())), 10, 300));
+
     useCustomModel = GetPrivateProfileIntW(L"Flash", L"UseCustomModel", 0, iniPath.c_str()) != 0;
 
     wchar_t modelNameWide[128]{};
@@ -250,7 +261,7 @@ void scriptMain() {
         customModel = MISC::GET_HASH_KEY(modelNameUtf8);
     }
 
-    log("FlashRDR2 v9 force-run started; Story Mode only");
+    log("FlashRDR2 v12 GIANT TRAFFIC started; Story Mode only");
 
     auto lastTick = std::chrono::steady_clock::now();
 
@@ -304,6 +315,7 @@ void scriptMain() {
         PLAYER::SET_PLAYER_INVINCIBLE(player, true);
         PLAYER::RESTORE_PLAYER_STAMINA(player, 1.0f);
         PED::SET_PED_CAN_RAGDOLL(ped, false);
+        PED::_SET_PED_SCALE(ped, giantScale);
 
         updateExplosiveBullets(ped);
 
@@ -315,7 +327,7 @@ void scriptMain() {
         static char hud[256];
         sprintf_s(
             hud,
-            "FLASH v9 | %s | %.0f km/h | GODMODE | INF STAMINA | EXPLOSIVE BULLETS | F9 reset",
+            "FLASH v12 GIANT | %s | %.0f km/h | GIANT %.1fx | GODMODE | INF STAMINA | EXPLOSIVE | F9 reset",
             sprintHeld.load() ? "MAX TURBO" : "SUPER RUN",
             kmh
         );

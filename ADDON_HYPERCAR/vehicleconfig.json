@@ -1,0 +1,97 @@
+{
+    "Config": {
+        "AltHandling": false,
+        "OpenMenuKey": "VK_F8",
+        "EnableController": false,
+        "Vehicles": {
+            "roadster": {
+                "type": "car",
+                "soundType": "electric",
+                "objectModel": "ironroadster",
+                "frontWheelModel": "ironroadsterwheel",
+                "rearWheelModel": "ironroadsterwheel",
+                "topSpeed": 420.0,
+                "accelMultiplier": 1.25,
+                "attachOffsets": [
+                    -0.01,
+                    1.2,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "frontWheelOffsets": [
+                    {
+                        "x": 1.0,
+                        "y": 1.7,
+                        "z": -0.42
+                    },
+                    {
+                        "x": -1.0,
+                        "y": 1.7,
+                        "z": -0.42
+                    }
+                ],
+                "frontDistanceToGrnd": 0.47,
+                "frontSuspensionUpperLimit": -0.22,
+                "frontSuspensionLowerLimit": -0.38,
+                "rearWheelOffsets": [
+                    {
+                        "x": 1.0,
+                        "y": -1.85,
+                        "z": -0.35
+                    },
+                    {
+                        "x": -1.0,
+                        "y": -1.85,
+                        "z": -0.35
+                    }
+                ],
+                "rearDistanceToGrnd": 0.41,
+                "rearSuspensionUpperLimit": -0.08,
+                "rearSuspensionLowerLimit": -0.38,
+                "headlightOffsets": [
+                    {
+                        "x": -0.8,
+                        "y": 2.1,
+                        "z": -0.14,
+                        "rx": 0.0,
+                        "ry": 0.0,
+                        "rz": 0
+                    },
+                    {
+                        "x": 0.8,
+                        "y": 2.1,
+                        "z": -0.14,
+                        "rx": 0.0,
+                        "ry": 0.0,
+                        "rz": 0
+                    }
+                ],
+                "brakelightOffsets": [
+                    {
+                        "x": -0.2,
+                        "y": -3.0,
+                        "z": -2.2,
+                        "rx": -40.0,
+                        "ry": 0.0,
+                        "rz": 180.0
+                    }
+                ],
+                "cloneOffsets": {
+                    "x": -0.48,
+                    "y": -0.25,
+                    "z": -0.13,
+                    "rx": 0.0,
+                    "ry": 0.0,
+                    "rz": 0.0
+                },
+                "ThirdPersonCamDistances": [
+                    10.0,
+                    15.0,
+                    20.0
+                ]
+            }
+        }
+    }
+}
