@@ -31,6 +31,10 @@ float turboSpeed = 52.0f;
 float runAnimRate = 2.5f;
 float turboAnimRate = 4.0f;
 
+float giantScale = 4.25f;
+float runForce = 80.0f;
+float turboForce = 260.0f;
+
 Hash originalModel = 0;
 Hash customModel = 0;
 
